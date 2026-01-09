@@ -28,6 +28,9 @@ from PySide6.QtWidgets import (
 )
 
 from PIL import Image
+from pillow_heif import register_heif_opener
+
+register_heif_opener()
 
 from media_annotator.config import AppConfig
 from media_annotator.db import dao
@@ -292,6 +295,7 @@ class MainWindow(QMainWindow):
             examples = (
                 session.query(FaceEmbedding)
                 .filter(FaceEmbedding.person_id == person_id)
+                .order_by(FaceEmbedding.quality_score.desc().nullslast(), FaceEmbedding.embedding_id.desc())
                 .all()
             )
         for example in examples:
@@ -303,8 +307,15 @@ class MainWindow(QMainWindow):
                     image = Image.open(example.media_path).convert("RGB")
                     x1, y1, x2, y2 = map(int, bbox)
                     crop = image.crop((x1, y1, x2, y2)).resize((96, 96))
-                    qimage = QImage(crop.tobytes(), crop.width, crop.height, QImage.Format_RGB888)
+                    qimage = QImage(
+                        crop.tobytes(),
+                        crop.width,
+                        crop.height,
+                        crop.width * 3,
+                        QImage.Format_RGB888,
+                    ).copy()
                     item.setIcon(QPixmap.fromImage(qimage))
+                    item.setText("")
             except Exception:
                 pass
             self.example_list.addItem(item)

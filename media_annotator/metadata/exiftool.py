@@ -11,5 +11,9 @@ def extract_exif(path: Path) -> Dict[str, Any]:
     result = run_command(["exiftool", "-j", "-n", str(path)])
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip())
+    if not result.stdout.strip():
+        return {}
     data = json.loads(result.stdout)
-    return data[0] if data else {}
+    if not isinstance(data, list) or not data:
+        return {}
+    return data[0] or {}
