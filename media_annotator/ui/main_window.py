@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, QSize, Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -33,6 +33,7 @@ from pillow_heif import register_heif_opener
 register_heif_opener()
 
 from media_annotator.config import AppConfig
+from media_annotator.constants import IMAGE_EXTENSIONS
 from media_annotator.db import dao
 from media_annotator.db.migrations import run_migrations
 from media_annotator.db.models import FaceEmbedding, MediaItem, MediaFace, Person
@@ -56,16 +57,19 @@ class MainWindow(QMainWindow):
         self.unknowns_tab = QWidget()
         self.rename_tab = QWidget()
         self.settings_tab = QWidget()
+        self.viewer_tab = QWidget()
 
         self.tabs.addTab(self.pipeline_tab, "Pipeline")
         self.tabs.addTab(self.unknowns_tab, "Unknown People")
         self.tabs.addTab(self.rename_tab, "Rename Preview")
         self.tabs.addTab(self.settings_tab, "Settings")
+        self.tabs.addTab(self.viewer_tab, "Viewer")
 
         self._build_pipeline_tab()
         self._build_unknowns_tab()
         self._build_rename_tab()
         self._build_settings_tab()
+        self._build_viewer_tab()
         self._load_settings()
 
     def _build_pipeline_tab(self) -> None:
@@ -129,6 +133,8 @@ class MainWindow(QMainWindow):
         self.example_list.setIconSize(QPixmap(96, 96).size())
         self.example_list.setResizeMode(QListWidget.Adjust)
         self.example_list.setSpacing(8)
+        self.example_list.setGridSize(QSize(110, 110))
+        self.example_list.setUniformItemSizes(True)
         layout.addWidget(self.example_list)
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self.refresh_unknowns)
@@ -176,11 +182,82 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         self.settings_tab.setLayout(layout)
 
+    def _build_viewer_tab(self) -> None:
+        layout = QHBoxLayout()
+        left_panel = QVBoxLayout()
+        self.viewer_list = QListWidget()
+        self.viewer_list.currentItemChanged.connect(self._show_viewer_item)
+        left_panel.addWidget(QLabel("Media items"))
+        left_panel.addWidget(self.viewer_list)
+        viewer_refresh = QPushButton("Refresh Items")
+        viewer_refresh.clicked.connect(self.refresh_viewer_items)
+        left_panel.addWidget(viewer_refresh)
+
+        right_panel = QVBoxLayout()
+        self.viewer_image = QLabel("Select an item to preview")
+        self.viewer_image.setAlignment(Qt.AlignCenter)
+        self.viewer_image.setMinimumHeight(240)
+        right_panel.addWidget(self.viewer_image)
+
+        right_panel.addWidget(QLabel("Metadata"))
+        self.viewer_metadata = QTextEdit()
+        self.viewer_metadata.setReadOnly(True)
+        right_panel.addWidget(self.viewer_metadata)
+
+        right_panel.addWidget(QLabel("Sidecar JSON"))
+        self.viewer_sidecar = QTextEdit()
+        self.viewer_sidecar.setReadOnly(True)
+        right_panel.addWidget(self.viewer_sidecar)
+
+        right_panel.addWidget(QLabel("Sidecar Text"))
+        self.viewer_sidecar_text = QTextEdit()
+        self.viewer_sidecar_text.setReadOnly(True)
+        right_panel.addWidget(self.viewer_sidecar_text)
+
+        faces_layout = QHBoxLayout()
+        recognized_layout = QVBoxLayout()
+        recognized_layout.addWidget(QLabel("Recognized faces"))
+        self.viewer_known_faces = QListWidget()
+        self.viewer_known_faces.setViewMode(QListWidget.IconMode)
+        self.viewer_known_faces.setIconSize(QPixmap(64, 64).size())
+        self.viewer_known_faces.setResizeMode(QListWidget.Adjust)
+        self.viewer_known_faces.setSpacing(6)
+        self.viewer_known_faces.setGridSize(QSize(76, 76))
+        self.viewer_known_faces.setUniformItemSizes(True)
+        recognized_layout.addWidget(self.viewer_known_faces)
+
+        unknown_layout = QVBoxLayout()
+        unknown_layout.addWidget(QLabel("Unrecognized faces"))
+        self.viewer_unknown_faces = QListWidget()
+        self.viewer_unknown_faces.setViewMode(QListWidget.IconMode)
+        self.viewer_unknown_faces.setIconSize(QPixmap(64, 64).size())
+        self.viewer_unknown_faces.setResizeMode(QListWidget.Adjust)
+        self.viewer_unknown_faces.setSpacing(6)
+        self.viewer_unknown_faces.setGridSize(QSize(76, 76))
+        self.viewer_unknown_faces.setUniformItemSizes(True)
+        unknown_layout.addWidget(self.viewer_unknown_faces)
+        self.viewer_unknown_name = QLineEdit()
+        self.viewer_unknown_name.setPlaceholderText("Label selected face")
+        unknown_layout.addWidget(self.viewer_unknown_name)
+        label_btn = QPushButton("Save Label")
+        label_btn.clicked.connect(self._save_viewer_face_label)
+        unknown_layout.addWidget(label_btn)
+
+        faces_layout.addLayout(recognized_layout)
+        faces_layout.addLayout(unknown_layout)
+        right_panel.addLayout(faces_layout)
+
+        layout.addLayout(left_panel, 1)
+        layout.addLayout(right_panel, 2)
+        self.viewer_tab.setLayout(layout)
+
     def _browse_input(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "Select Input Folder")
         if directory:
             self.input_path.setText(directory)
             self.settings.setValue("input_path", directory)
+            self.refresh_unknowns()
+            self.refresh_viewer_items()
 
     def _toggle_button(self) -> None:
         button = self.sender()
@@ -213,6 +290,7 @@ class MainWindow(QMainWindow):
         self.worker.finished.connect(self._pipeline_finished)
         self.progress_bar.setRange(0, 0)
         self.worker.start()
+        self.refresh_viewer_items()
 
     def _cancel_pipeline(self) -> None:
         if self.worker and self.worker.isRunning():
@@ -247,6 +325,8 @@ class MainWindow(QMainWindow):
             self.settings.value("llm_temperature", self.config.llm.temperature, type=float)
         )
         self.llm_timeout.setValue(self.settings.value("llm_timeout_s", self.config.llm.timeout_s, type=int))
+        self.refresh_unknowns()
+        self.refresh_viewer_items()
 
     def _apply_settings_to_config(self) -> None:
         self.config.llm.backend = self.llm_backend.currentText()
@@ -270,7 +350,16 @@ class MainWindow(QMainWindow):
         session_factory = create_session(str(self.config.db_path))
         with session_factory() as session:
             run_migrations(session)
-            unknowns = dao.get_unknown_people(session)
+            input_dir = Path(self.input_path.text())
+            unknowns_query = session.query(Person).filter(Person.is_known.is_(False))
+            if input_dir.exists():
+                unknowns_query = (
+                    unknowns_query.join(MediaFace, MediaFace.person_id == Person.person_id)
+                    .join(MediaItem, MediaItem.media_id == MediaFace.media_id)
+                    .filter(MediaItem.path.like(f"{input_dir}%"))
+                    .distinct()
+                )
+            unknowns = unknowns_query.all()
             for person in unknowns:
                 count = (
                     session.query(MediaFace)
@@ -292,18 +381,21 @@ class MainWindow(QMainWindow):
         person_id = selected.data(Qt.UserRole)
         session_factory = create_session(str(self.config.db_path))
         with session_factory() as session:
-            examples = (
+            examples_query = (
                 session.query(FaceEmbedding)
                 .filter(FaceEmbedding.person_id == person_id)
                 .order_by(FaceEmbedding.quality_score.desc().nullslast(), FaceEmbedding.embedding_id.desc())
-                .all()
             )
+            input_dir = Path(self.input_path.text())
+            if input_dir.exists():
+                examples_query = examples_query.filter(FaceEmbedding.media_path.like(f"{input_dir}%"))
+            examples = examples_query.all()
         for example in examples:
             item = QListWidgetItem()
             item.setToolTip(Path(example.media_path).name)
             try:
                 bbox = json.loads(example.bbox or "[]")
-                if bbox and Path(example.media_path).suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".tiff", ".heic", ".heif"]:
+                if bbox and Path(example.media_path).suffix.lower() in IMAGE_EXTENSIONS:
                     image = Image.open(example.media_path).convert("RGB")
                     x1, y1, x2, y2 = map(int, bbox)
                     crop = image.crop((x1, y1, x2, y2)).resize((96, 96))
@@ -319,6 +411,119 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self.example_list.addItem(item)
+
+    def refresh_viewer_items(self) -> None:
+        self.viewer_list.clear()
+        input_dir = Path(self.input_path.text())
+        if not input_dir.exists():
+            return
+        session_factory = create_session(str(self.config.db_path))
+        with session_factory() as session:
+            run_migrations(session)
+            items = session.query(MediaItem).filter(MediaItem.path.like(f"{input_dir}%")).all()
+            for item in items:
+                list_item = QListWidgetItem(Path(item.path).name)
+                list_item.setData(Qt.UserRole, item.media_id)
+                self.viewer_list.addItem(list_item)
+
+    def _show_viewer_item(self) -> None:
+        self.viewer_metadata.clear()
+        self.viewer_sidecar.clear()
+        self.viewer_sidecar_text.clear()
+        self.viewer_image.clear()
+        self.viewer_known_faces.clear()
+        self.viewer_unknown_faces.clear()
+        selected = self.viewer_list.currentItem()
+        if not selected:
+            return
+        media_id = selected.data(Qt.UserRole)
+        session_factory = create_session(str(self.config.db_path))
+        with session_factory() as session:
+            item = session.get(MediaItem, media_id)
+            if not item:
+                return
+            metadata_payload = item.exif_json or item.meta_json or ""
+            self.viewer_metadata.setPlainText(metadata_payload)
+            sidecar_path = Path(item.path).with_suffix(".json")
+            if sidecar_path.exists():
+                self.viewer_sidecar.setPlainText(sidecar_path.read_text(encoding="utf-8"))
+            else:
+                self.viewer_sidecar.setPlainText("")
+            text_sidecar_path = Path(item.path).with_suffix(".txt")
+            if text_sidecar_path.exists():
+                self.viewer_sidecar_text.setPlainText(text_sidecar_path.read_text(encoding="utf-8"))
+            else:
+                self.viewer_sidecar_text.setPlainText("")
+
+            if item.type == "image":
+                try:
+                    image = Image.open(item.path).convert("RGB")
+                    image.thumbnail((640, 640))
+                    qimage = QImage(
+                        image.tobytes(),
+                        image.width,
+                        image.height,
+                        image.width * 3,
+                        QImage.Format_RGB888,
+                    ).copy()
+                    self.viewer_image.setPixmap(QPixmap.fromImage(qimage))
+                except Exception:
+                    self.viewer_image.setText("Failed to load image preview")
+            else:
+                self.viewer_image.setText("Preview unavailable for videos")
+
+            faces = (
+                session.query(FaceEmbedding, Person)
+                .join(Person, FaceEmbedding.person_id == Person.person_id)
+                .filter(FaceEmbedding.media_path == item.path)
+                .order_by(FaceEmbedding.quality_score.desc().nullslast(), FaceEmbedding.embedding_id.desc())
+                .all()
+            )
+            for embedding, person in faces:
+                list_item = QListWidgetItem()
+                list_item.setData(Qt.UserRole, person.person_id)
+                label = person.display_name or f"unknown_{person.person_id:06d}"
+                list_item.setToolTip(label)
+                try:
+                    bbox = json.loads(embedding.bbox or "[]")
+                    if bbox and Path(embedding.media_path).suffix.lower() in IMAGE_EXTENSIONS:
+                        img = Image.open(embedding.media_path).convert("RGB")
+                        x1, y1, x2, y2 = map(int, bbox)
+                        crop = img.crop((x1, y1, x2, y2)).resize((64, 64))
+                        qimage = QImage(
+                            crop.tobytes(),
+                            crop.width,
+                            crop.height,
+                            crop.width * 3,
+                            QImage.Format_RGB888,
+                        ).copy()
+                        list_item.setIcon(QPixmap.fromImage(qimage))
+                        list_item.setText("")
+                except Exception:
+                    list_item.setText(label)
+                if person.is_known:
+                    self.viewer_known_faces.addItem(list_item)
+                else:
+                    self.viewer_unknown_faces.addItem(list_item)
+
+    def _save_viewer_face_label(self) -> None:
+        selected = self.viewer_unknown_faces.currentItem()
+        if not selected:
+            return
+        new_name = self.viewer_unknown_name.text().strip()
+        if not new_name:
+            return
+        person_id = selected.data(Qt.UserRole)
+        session_factory = create_session(str(self.config.db_path))
+        with session_factory() as session:
+            person = session.get(Person, person_id)
+            if person:
+                person.display_name = new_name
+                person.is_known = True
+                session.commit()
+        self.viewer_unknown_name.clear()
+        self.refresh_unknowns()
+        self._show_viewer_item()
 
     def _save_unknown_name(self) -> None:
         selected = self.unknown_list.currentItem()

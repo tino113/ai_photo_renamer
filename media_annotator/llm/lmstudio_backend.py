@@ -12,7 +12,10 @@ from media_annotator.llm.prompting import build_prompt, validate_output
 
 class LMStudioBackend(LLMBackend):
     def __init__(self, model: str, base_url: str, timeout_s: int = 120, temperature: float = 0.2) -> None:
-        self.client = OpenAI(base_url=base_url, api_key="lmstudio")
+        normalized_base_url = base_url.rstrip("/")
+        if not normalized_base_url.endswith("/v1"):
+            normalized_base_url = f"{normalized_base_url}/v1"
+        self.client = OpenAI(base_url=normalized_base_url, api_key="lmstudio")
         self.model = model
         self.timeout_s = timeout_s
         self.temperature = temperature
