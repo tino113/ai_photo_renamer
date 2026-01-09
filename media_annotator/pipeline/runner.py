@@ -62,7 +62,7 @@ def run_describe(config: AppConfig, input_dir: Path, progress_callback=None) -> 
     session_factory = create_session(str(config.db_path))
     with session_factory() as session:
         run_migrations(session)
-        for item in session.query(MediaItem).filter(MediaItem.path.like(f\"{input_dir}%\")).all():
+        for item in session.query(MediaItem).filter(MediaItem.path.like(f"{input_dir}%")).all():
             if not Path(item.path).exists():
                 continue
             if not should_process(item, config.pipeline.pipeline_version, config.pipeline.force, "llm_done"):
