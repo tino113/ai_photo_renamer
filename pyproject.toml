@@ -43,7 +43,7 @@ llm_local = [
 ]
 gui = [
   "PySide6>=6.6",
-  "qdarktheme>=2.1",
+  "pyqtdarktheme>=2.1",
 ]
 faiss = [
   "faiss-cpu>=1.8",
