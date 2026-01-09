@@ -243,6 +243,10 @@ def doctor() -> None:
 
 @app.command()
 def gui() -> None:
+    if not _check_import("PySide6"):
+        print("Missing GUI dependency: PySide6")
+        print('Install with: python -m pip install "media-annotator[gui]"')
+        raise typer.Exit(code=1)
     from media_annotator.ui.gui_app import run_gui
 
     run_gui()
