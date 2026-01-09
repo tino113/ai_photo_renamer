@@ -22,4 +22,7 @@ def extract_ffprobe(path: Path) -> Dict[str, Any]:
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip())
-    return json.loads(result.stdout)
+    if not result.stdout.strip():
+        return {}
+    data = json.loads(result.stdout)
+    return data if isinstance(data, dict) else {}

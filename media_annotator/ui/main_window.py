@@ -6,7 +6,11 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
+    QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -15,6 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTabWidget,
     QTextEdit,
     QProgressBar,
@@ -23,6 +28,9 @@ from PySide6.QtWidgets import (
 )
 
 from PIL import Image
+from pillow_heif import register_heif_opener
+
+register_heif_opener()
 
 from media_annotator.config import AppConfig
 from media_annotator.db import dao
@@ -47,14 +55,17 @@ class MainWindow(QMainWindow):
         self.pipeline_tab = QWidget()
         self.unknowns_tab = QWidget()
         self.rename_tab = QWidget()
+        self.settings_tab = QWidget()
 
         self.tabs.addTab(self.pipeline_tab, "Pipeline")
         self.tabs.addTab(self.unknowns_tab, "Unknown People")
         self.tabs.addTab(self.rename_tab, "Rename Preview")
+        self.tabs.addTab(self.settings_tab, "Settings")
 
         self._build_pipeline_tab()
         self._build_unknowns_tab()
         self._build_rename_tab()
+        self._build_settings_tab()
         self._load_settings()
 
     def _build_pipeline_tab(self) -> None:
@@ -80,6 +91,10 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.enable_faces)
         layout.addWidget(self.enable_llm)
+
+        settings_btn = QPushButton("Open Settings")
+        settings_btn.clicked.connect(self._open_settings_tab)
+        layout.addWidget(settings_btn)
 
         self.start_btn = QPushButton("Start")
         self.start_btn.clicked.connect(self._start_pipeline)
@@ -108,7 +123,12 @@ class MainWindow(QMainWindow):
         self.rename_btn.clicked.connect(self._save_unknown_name)
         layout.addWidget(self.rename_input)
         layout.addWidget(self.rename_btn)
+        layout.addWidget(QLabel("Detected face crops"))
         self.example_list = QListWidget()
+        self.example_list.setViewMode(QListWidget.IconMode)
+        self.example_list.setIconSize(QPixmap(96, 96).size())
+        self.example_list.setResizeMode(QListWidget.Adjust)
+        self.example_list.setSpacing(8)
         layout.addWidget(self.example_list)
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self.refresh_unknowns)
@@ -125,6 +145,37 @@ class MainWindow(QMainWindow):
         layout.addWidget(generate_btn)
         self.rename_tab.setLayout(layout)
 
+    def _build_settings_tab(self) -> None:
+        layout = QVBoxLayout()
+        form_group = QGroupBox("LLM Settings")
+        form = QFormLayout(form_group)
+
+        self.llm_backend = QComboBox()
+        self.llm_backend.addItems(["ollama", "lmstudio", "local"])
+        form.addRow("LLM Backend", self.llm_backend)
+
+        self.llm_model = QLineEdit()
+        form.addRow("LLM Model", self.llm_model)
+
+        self.llm_base_url = QLineEdit()
+        form.addRow("Base URL", self.llm_base_url)
+
+        self.llm_temperature = QDoubleSpinBox()
+        self.llm_temperature.setRange(0.0, 1.0)
+        self.llm_temperature.setSingleStep(0.05)
+        form.addRow("Temperature", self.llm_temperature)
+
+        self.llm_timeout = QSpinBox()
+        self.llm_timeout.setRange(1, 600)
+        form.addRow("Timeout (s)", self.llm_timeout)
+
+        layout.addWidget(form_group)
+        apply_btn = QPushButton("Apply Settings")
+        apply_btn.clicked.connect(self._apply_settings)
+        layout.addWidget(apply_btn)
+        layout.addStretch()
+        self.settings_tab.setLayout(layout)
+
     def _browse_input(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "Select Input Folder")
         if directory:
@@ -137,16 +188,25 @@ class MainWindow(QMainWindow):
             label = button.text().split(":")[0]
             button.setText(f"{label}: {'ON' if button.isChecked() else 'OFF'}")
 
+    def _open_settings_tab(self) -> None:
+        self.tabs.setCurrentWidget(self.settings_tab)
+
+    def _apply_settings(self) -> None:
+        self._save_settings()
+        self._apply_settings_to_config()
+
     def _start_pipeline(self) -> None:
         input_dir = Path(self.input_path.text())
         if not input_dir.exists():
             QMessageBox.warning(self, "Error", "Input directory does not exist")
             return
         self._save_settings()
+        self._apply_settings_to_config()
         self.worker = PipelineWorker(
             input_dir=input_dir,
             enable_faces=self.enable_faces.isChecked(),
             enable_llm=self.enable_llm.isChecked(),
+            config=self.config,
         )
         self.worker.progress.connect(self._append_log)
         self.worker.error.connect(self._append_log)
@@ -168,6 +228,11 @@ class MainWindow(QMainWindow):
         self.settings.setValue("input_path", self.input_path.text())
         self.settings.setValue("faces_enabled", self.enable_faces.isChecked())
         self.settings.setValue("llm_enabled", self.enable_llm.isChecked())
+        self.settings.setValue("llm_backend", self.llm_backend.currentText())
+        self.settings.setValue("llm_model", self.llm_model.text())
+        self.settings.setValue("llm_base_url", self.llm_base_url.text())
+        self.settings.setValue("llm_temperature", self.llm_temperature.value())
+        self.settings.setValue("llm_timeout_s", self.llm_timeout.value())
 
     def _load_settings(self) -> None:
         self.input_path.setText(self.settings.value("input_path", ""))
@@ -175,6 +240,21 @@ class MainWindow(QMainWindow):
         self.enable_llm.setChecked(self.settings.value("llm_enabled", True, type=bool))
         self.enable_faces.setText(f"Faces: {'ON' if self.enable_faces.isChecked() else 'OFF'}")
         self.enable_llm.setText(f"LLM: {'ON' if self.enable_llm.isChecked() else 'OFF'}")
+        self.llm_backend.setCurrentText(self.settings.value("llm_backend", self.config.llm.backend))
+        self.llm_model.setText(self.settings.value("llm_model", self.config.llm.model))
+        self.llm_base_url.setText(self.settings.value("llm_base_url", self.config.llm.base_url or ""))
+        self.llm_temperature.setValue(
+            self.settings.value("llm_temperature", self.config.llm.temperature, type=float)
+        )
+        self.llm_timeout.setValue(self.settings.value("llm_timeout_s", self.config.llm.timeout_s, type=int))
+
+    def _apply_settings_to_config(self) -> None:
+        self.config.llm.backend = self.llm_backend.currentText()
+        self.config.llm.model = self.llm_model.text().strip() or self.config.llm.model
+        base_url = self.llm_base_url.text().strip()
+        self.config.llm.base_url = base_url or None
+        self.config.llm.temperature = float(self.llm_temperature.value())
+        self.config.llm.timeout_s = int(self.llm_timeout.value())
 
     def _append_log(self, message: str) -> None:
         self.log_output.append(message)
@@ -215,19 +295,27 @@ class MainWindow(QMainWindow):
             examples = (
                 session.query(FaceEmbedding)
                 .filter(FaceEmbedding.person_id == person_id)
-                .limit(5)
+                .order_by(FaceEmbedding.quality_score.desc().nullslast(), FaceEmbedding.embedding_id.desc())
                 .all()
             )
         for example in examples:
-            item = QListWidgetItem(Path(example.media_path).name)
+            item = QListWidgetItem()
+            item.setToolTip(Path(example.media_path).name)
             try:
                 bbox = json.loads(example.bbox or "[]")
                 if bbox and Path(example.media_path).suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".tiff", ".heic", ".heif"]:
                     image = Image.open(example.media_path).convert("RGB")
                     x1, y1, x2, y2 = map(int, bbox)
                     crop = image.crop((x1, y1, x2, y2)).resize((96, 96))
-                    qimage = QImage(crop.tobytes(), crop.width, crop.height, QImage.Format_RGB888)
+                    qimage = QImage(
+                        crop.tobytes(),
+                        crop.width,
+                        crop.height,
+                        crop.width * 3,
+                        QImage.Format_RGB888,
+                    ).copy()
                     item.setIcon(QPixmap.fromImage(qimage))
+                    item.setText("")
             except Exception:
                 pass
             self.example_list.addItem(item)
