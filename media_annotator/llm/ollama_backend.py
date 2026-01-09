@@ -11,10 +11,17 @@ from media_annotator.llm.prompting import build_prompt, validate_output
 
 
 class OllamaBackend(LLMBackend):
-    def __init__(self, model: str, base_url: Optional[str] = None, timeout_s: int = 120) -> None:
+    def __init__(
+        self,
+        model: str,
+        base_url: Optional[str] = None,
+        timeout_s: int = 120,
+        temperature: float = 0.2,
+    ) -> None:
         self.model = model
         self.base_url = base_url or "http://localhost:11434"
         self.timeout_s = timeout_s
+        self.temperature = temperature
 
     def _encode_images(self, images: List[str]) -> List[str]:
         encoded = []
@@ -30,6 +37,7 @@ class OllamaBackend(LLMBackend):
                 {"role": "user", "content": prompt, "images": self._encode_images(images)},
             ],
             "stream": False,
+            "options": {"temperature": self.temperature},
         }
         with httpx.Client(timeout=self.timeout_s) as client:
             response = client.post(f"{self.base_url}/api/chat", json=payload)

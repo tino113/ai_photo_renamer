@@ -17,6 +17,7 @@ dependencies = [
   "sqlalchemy>=2.0",
   "opencv-python>=4.8",
   "pillow>=10.0",
+  "pillow-heif>=0.16",
   "numpy>=1.26",
   "python-dateutil>=2.9",
   "loguru>=0.7",

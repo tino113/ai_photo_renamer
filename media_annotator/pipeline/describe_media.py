@@ -24,13 +24,23 @@ def _select_backend(config: AppConfig) -> LLMBackend:
     if config.llm.backend == "ollama":
         from media_annotator.llm.ollama_backend import OllamaBackend
 
-        return OllamaBackend(config.llm.model, config.llm.base_url, config.llm.timeout_s)
+        return OllamaBackend(
+            config.llm.model,
+            config.llm.base_url,
+            config.llm.timeout_s,
+            config.llm.temperature,
+        )
     if config.llm.backend == "lmstudio":
         if not config.llm.base_url:
             raise ValueError("LM Studio backend requires base_url")
         from media_annotator.llm.lmstudio_backend import LMStudioBackend
 
-        return LMStudioBackend(config.llm.model, config.llm.base_url, config.llm.timeout_s)
+        return LMStudioBackend(
+            config.llm.model,
+            config.llm.base_url,
+            config.llm.timeout_s,
+            config.llm.temperature,
+        )
     if config.llm.backend == "local":
         from media_annotator.llm.local_safetensors_backend import LocalSafetensorsBackend
 

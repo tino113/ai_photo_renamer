@@ -11,10 +11,11 @@ from media_annotator.llm.prompting import build_prompt, validate_output
 
 
 class LMStudioBackend(LLMBackend):
-    def __init__(self, model: str, base_url: str, timeout_s: int = 120) -> None:
+    def __init__(self, model: str, base_url: str, timeout_s: int = 120, temperature: float = 0.2) -> None:
         self.client = OpenAI(base_url=base_url, api_key="lmstudio")
         self.model = model
         self.timeout_s = timeout_s
+        self.temperature = temperature
 
     def describe(
         self,
@@ -38,7 +39,7 @@ class LMStudioBackend(LLMBackend):
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.2,
+                temperature=self.temperature,
                 timeout=self.timeout_s,
             )
             content = response.choices[0].message.content or ""

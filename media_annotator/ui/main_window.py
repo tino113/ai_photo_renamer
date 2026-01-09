@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -88,6 +89,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.enable_faces)
         layout.addWidget(self.enable_llm)
 
+        settings_btn = QPushButton("Open Settings")
+        settings_btn.clicked.connect(self._open_settings_tab)
+        layout.addWidget(settings_btn)
+
         self.start_btn = QPushButton("Start")
         self.start_btn.clicked.connect(self._start_pipeline)
         layout.addWidget(self.start_btn)
@@ -115,6 +120,7 @@ class MainWindow(QMainWindow):
         self.rename_btn.clicked.connect(self._save_unknown_name)
         layout.addWidget(self.rename_input)
         layout.addWidget(self.rename_btn)
+        layout.addWidget(QLabel("Detected face crops"))
         self.example_list = QListWidget()
         self.example_list.setViewMode(QListWidget.IconMode)
         self.example_list.setIconSize(QPixmap(96, 96).size())
@@ -138,7 +144,8 @@ class MainWindow(QMainWindow):
 
     def _build_settings_tab(self) -> None:
         layout = QVBoxLayout()
-        form = QFormLayout()
+        form_group = QGroupBox("LLM Settings")
+        form = QFormLayout(form_group)
 
         self.llm_backend = QComboBox()
         self.llm_backend.addItems(["ollama", "lmstudio", "local"])
@@ -159,7 +166,10 @@ class MainWindow(QMainWindow):
         self.llm_timeout.setRange(1, 600)
         form.addRow("Timeout (s)", self.llm_timeout)
 
-        layout.addLayout(form)
+        layout.addWidget(form_group)
+        apply_btn = QPushButton("Apply Settings")
+        apply_btn.clicked.connect(self._apply_settings)
+        layout.addWidget(apply_btn)
         layout.addStretch()
         self.settings_tab.setLayout(layout)
 
@@ -174,6 +184,13 @@ class MainWindow(QMainWindow):
         if isinstance(button, QPushButton):
             label = button.text().split(":")[0]
             button.setText(f"{label}: {'ON' if button.isChecked() else 'OFF'}")
+
+    def _open_settings_tab(self) -> None:
+        self.tabs.setCurrentWidget(self.settings_tab)
+
+    def _apply_settings(self) -> None:
+        self._save_settings()
+        self._apply_settings_to_config()
 
     def _start_pipeline(self) -> None:
         input_dir = Path(self.input_path.text())
